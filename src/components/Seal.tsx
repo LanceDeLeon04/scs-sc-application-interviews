@@ -4,13 +4,11 @@ interface SealProps {
 
 export default function Seal({ className = "h-9 w-9" }: SealProps) {
   return (
-    <svg viewBox="0 0 64 64" className={className} aria-hidden="true">
-      <circle cx="32" cy="32" r="30" fill="#0A2050" />
-      <circle cx="32" cy="32" r="24" fill="none" stroke="#D4AF37" strokeWidth="2" />
-      <path
-        d="M32 16 L37 27 L49 28 L40 36 L43 48 L32 41 L21 48 L24 36 L15 28 L27 27 Z"
-        fill="#D4AF37"
-      />
-    </svg>
+    <img
+      src="/scs-logo.png"
+      alt="School of Computer Studies seal"
+      className={`${className} shrink-0 object-contain`}
+      draggable={false}
+    />
   );
 }

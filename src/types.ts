@@ -23,6 +23,10 @@ export interface Applicant {
   year_level: string | null;
   position_applied_id: string | null;
   position_assigned_id: string | null;
+  // Additional positions this same person also applied for (beyond
+  // position_applied_id). One applicant = one row = one grading sheet,
+  // even if they applied for several positions.
+  other_positions?: string[] | null;
   status: ApplicantStatus;
   created_at: string;
   // joined
@@ -57,6 +61,8 @@ export interface Evaluation {
   professionalism: number;
   recommendation: Recommendation;
   notes: string | null;
+  recommended_positions?: string[];
+  recommended_other_position?: string | null;
   created_at: string;
 }
 

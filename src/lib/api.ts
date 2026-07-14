@@ -50,6 +50,37 @@ export async function createApplicant(input: {
   year_level?: string;
   position_applied_id: string;
 }) {
+  // One applicant = one row = one grading sheet, even if they apply for
+  // multiple positions. If a person with this name already exists, fold the
+  // new position into other_positions instead of creating a duplicate row.
+  const { data: existing, error: lookupError } = await supabase
+    .from("applicants")
+    .select("id, position_applied_id, other_positions, position_applied:positions!applicants_position_applied_id_fkey(name)")
+    .ilike("full_name", input.full_name.trim())
+    .maybeSingle();
+  if (lookupError) throw lookupError;
+
+  const { data: newPosition, error: posError } = await supabase
+    .from("positions")
+    .select("name")
+    .eq("id", input.position_applied_id)
+    .single();
+  if (posError) throw posError;
+
+  if (existing) {
+    if (existing.position_applied_id === input.position_applied_id) return; // already applied here
+
+    const otherPositions: string[] = (existing as any).other_positions ?? [];
+    if (otherPositions.includes(newPosition.name)) return; // already recorded
+
+    const { error } = await supabase
+      .from("applicants")
+      .update({ other_positions: [...otherPositions, newPosition.name] })
+      .eq("id", existing.id);
+    if (error) throw error;
+    return;
+  }
+
   const { error } = await supabase.from("applicants").insert({
     ...input,
     position_assigned_id: input.position_applied_id,
@@ -86,6 +117,12 @@ export async function upsertEvaluation(payload: Omit<Evaluation, "id" | "created
   const { error } = await supabase
     .from("evaluations")
     .upsert(payload, { onConflict: "applicant_id,evaluator_id" });
+  if (error) throw error;
+}
+
+/** Clears (deletes) a single panelist's submitted score sheet for an applicant. Commissioner-only. */
+export async function deleteEvaluation(evaluationId: string) {
+  const { error } = await supabase.from("evaluations").delete().eq("id", evaluationId);
   if (error) throw error;
 }
 

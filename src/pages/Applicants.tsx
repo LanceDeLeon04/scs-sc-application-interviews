@@ -178,7 +178,14 @@ export default function Applicants() {
                         {a.course ?? "—"} {a.year_level ? `· ${a.year_level}` : ""}
                       </p>
                     </td>
-                    <td className="px-5 py-4 text-ink/70">{a.position_applied?.name ?? "—"}</td>
+                    <td className="px-5 py-4 text-ink/70">
+                      {a.position_applied?.name ?? "—"}
+                      {a.other_positions && a.other_positions.length > 0 && (
+                        <span className="ml-1.5 inline-flex items-center rounded-full bg-nu-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-nu-700" title={`Also applied: ${a.other_positions.join(", ")}`}>
+                          +{a.other_positions.length} more
+                        </span>
+                      )}
+                    </td>
                     <td className="px-5 py-4">
                       <span className={reassigned ? "font-semibold text-gold-700" : "text-ink/70"}>
                         {a.position_assigned?.name ?? "—"}

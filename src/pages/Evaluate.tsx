@@ -6,13 +6,15 @@ import {
   fetchMyEvaluation,
   fetchAssignedEvaluatorIds,
   upsertEvaluation,
+  deleteEvaluation,
+  fetchPositions,
 } from "../lib/api";
-import type { Applicant, Evaluation, Recommendation } from "../types";
+import type { Applicant, Evaluation, Position, Recommendation } from "../types";
 import { CRITERIA, RECOMMENDATIONS, weightedScore } from "../types";
 import RatingInput from "../components/RatingInput";
 import StatusBadge from "../components/StatusBadge";
 import { useAuth } from "../context/AuthContext";
-import { ArrowLeft, CheckCircle2, Save } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Save, Eraser } from "lucide-react";
 
 type ScoreState = Record<(typeof CRITERIA)[number]["key"], number>;
 
@@ -36,10 +38,16 @@ export default function Evaluate() {
   const [scores, setScores] = useState<ScoreState>(EMPTY_SCORES);
   const [recommendation, setRecommendation] = useState<Recommendation | "">("");
   const [notes, setNotes] = useState("");
+  const [allPositions, setAllPositions] = useState<Position[]>([]);
+  const [recommendedPositions, setRecommendedPositions] = useState<string[]>([]);
+  const [recommendedOtherPosition, setRecommendedOtherPosition] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [mineId, setMineId] = useState<string | null>(null);
+  const [confirmClearId, setConfirmClearId] = useState<string | null>(null);
+  const [clearingId, setClearingId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!id || !user) return;
@@ -47,14 +55,16 @@ export default function Evaluate() {
     async function load() {
       setLoading(true);
       try {
-        const [a, evals, mine] = await Promise.all([
+        const [a, evals, mine, positions] = await Promise.all([
           fetchApplicant(id!),
           fetchEvaluationsForApplicant(id!),
           fetchMyEvaluation(id!, user!.id),
+          fetchPositions(),
         ]);
         if (!active) return;
         setApplicant(a);
         setPriorEvaluations(evals);
+        setAllPositions(positions);
 
         if (!isAdmin) {
           const assignedIds = await fetchAssignedEvaluatorIds(id!);
@@ -74,6 +84,11 @@ export default function Evaluate() {
           });
           setRecommendation(mine.recommendation);
           setNotes(mine.notes ?? "");
+          setRecommendedPositions(mine.recommended_positions ?? []);
+          setRecommendedOtherPosition(mine.recommended_other_position ?? "");
+          setMineId(mine.id);
+        } else {
+          setMineId(null);
         }
       } catch (e) {
         setError(e instanceof Error ? e.message : "Failed to load applicant.");
@@ -102,6 +117,8 @@ export default function Evaluate() {
         ...scores,
         recommendation,
         notes: notes.trim() || null,
+        recommended_positions: recommendedPositions,
+        recommended_other_position: recommendedOtherPosition || null,
       });
       const evals = await fetchEvaluationsForApplicant(id);
       setPriorEvaluations(evals);
@@ -110,6 +127,31 @@ export default function Evaluate() {
       setError(e instanceof Error ? e.message : "Could not save evaluation.");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleClear(evaluationId: string) {
+    if (!id) return;
+    setClearingId(evaluationId);
+    setError(null);
+    try {
+      await deleteEvaluation(evaluationId);
+      const evals = await fetchEvaluationsForApplicant(id);
+      setPriorEvaluations(evals);
+      if (evaluationId === mineId) {
+        setMineId(null);
+        setScores(EMPTY_SCORES);
+        setRecommendation("");
+        setNotes("");
+        setRecommendedPositions([]);
+        setRecommendedOtherPosition("");
+        setSaved(false);
+      }
+      setConfirmClearId(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not clear this evaluation.");
+    } finally {
+      setClearingId(null);
     }
   }
 
@@ -145,6 +187,17 @@ export default function Evaluate() {
 
   const othersEvaluations = priorEvaluations.filter((e) => e.evaluator_id !== user?.id);
 
+  const appliedPositionNames = [
+    applicant.position_applied?.name,
+    ...(applicant.other_positions ?? []),
+  ].filter((n): n is string => Boolean(n));
+
+  function togglePosition(name: string) {
+    setRecommendedPositions((prev) =>
+      prev.includes(name) ? prev.filter((p) => p !== name) : [...prev, name]
+    );
+  }
+
   return (
     <div className="mx-auto max-w-4xl px-6 py-10">
       <Link to="/applicants" className="inline-flex items-center gap-1.5 text-sm font-semibold text-nu-700 hover:text-nu-900">
@@ -156,7 +209,13 @@ export default function Evaluate() {
           <p className="eyebrow">Evaluation Sheet</p>
           <h1 className="mt-1 font-display text-2xl font-bold text-nu-900">{applicant.full_name}</h1>
           <p className="mt-1 text-sm text-ink/50">
-            Applied for <strong className="text-nu-700">{applicant.position_applied?.name ?? "—"}</strong>
+            Applied for{" "}
+            <strong className="text-nu-700">
+              {applicant.position_applied?.name ?? "—"}
+              {applicant.other_positions && applicant.other_positions.length > 0
+                ? `, ${applicant.other_positions.join(", ")}`
+                : ""}
+            </strong>
             {applicant.position_assigned_id !== applicant.position_applied_id && (
               <> · Currently assigned to <strong className="text-gold-700">{applicant.position_assigned?.name}</strong></>
             )}
@@ -235,6 +294,60 @@ export default function Evaluate() {
         </div>
       </div>
 
+      {/* Recommended Position(s) */}
+      <div className="card mt-3 p-5">
+        <p className="font-display text-sm font-bold text-nu-900">Recommend For Position</p>
+        <p className="mt-0.5 text-xs text-ink/50">Check which of the applicant's applied position(s) you recommend them for.</p>
+        <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+          {appliedPositionNames.map((name) => (
+            <label
+              key={name}
+              className={`flex cursor-pointer items-center gap-3 rounded-xl border px-4 py-3 text-left text-sm font-semibold transition ${
+                recommendedPositions.includes(name)
+                  ? "border-gold-500 bg-nu-900 text-white shadow-gold"
+                  : "border-nu-100 bg-white text-ink/70 hover:border-nu-500"
+              }`}
+            >
+              <input
+                type="checkbox"
+                className="sr-only"
+                checked={recommendedPositions.includes(name)}
+                onChange={() => togglePosition(name)}
+              />
+              <span
+                className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border-2 ${
+                  recommendedPositions.includes(name) ? "border-gold-400 bg-gold-400" : "border-nu-200"
+                }`}
+              >
+                {recommendedPositions.includes(name) && <CheckCircle2 size={12} className="text-nu-900" />}
+              </span>
+              {name}
+            </label>
+          ))}
+        </div>
+
+        <div className="mt-4">
+          <label className="label mb-1.5 block" htmlFor="other-position">
+            Others: <span className="font-normal text-ink/40">(recommend for a different position, if applicable)</span>
+          </label>
+          <select
+            id="other-position"
+            className="input"
+            value={recommendedOtherPosition}
+            onChange={(e) => setRecommendedOtherPosition(e.target.value)}
+          >
+            <option value="">None</option>
+            {allPositions
+              .filter((p) => !appliedPositionNames.includes(p.name))
+              .map((p) => (
+                <option key={p.id} value={p.name}>
+                  {p.name}
+                </option>
+              ))}
+          </select>
+        </div>
+      </div>
+
       {/* Notes */}
       <div className="card mt-3 p-5">
         <label className="font-display text-sm font-bold text-nu-900" htmlFor="notes">
@@ -260,9 +373,34 @@ export default function Evaluate() {
         <p className="text-xs text-ink/40">
           {allRated && recommendation ? "All fields complete — ready to submit." : "Rate all six criteria and select a recommendation to submit."}
         </p>
-        <button onClick={handleSubmit} disabled={saving || !allRated || !recommendation} className="btn-gold">
-          <Save size={16} /> {saving ? "Saving…" : "Save Evaluation"}
-        </button>
+        <div className="flex items-center gap-2">
+          {isAdmin && mineId && (
+            <>
+              {confirmClearId === mineId ? (
+                <span className="flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700">
+                  Clear this score sheet?
+                  <button
+                    onClick={() => handleClear(mineId)}
+                    disabled={clearingId === mineId}
+                    className="rounded-lg bg-rose-600 px-2.5 py-1 text-white hover:bg-rose-700"
+                  >
+                    {clearingId === mineId ? "Clearing…" : "Yes, clear"}
+                  </button>
+                  <button onClick={() => setConfirmClearId(null)} className="rounded-lg px-2 py-1 text-rose-700 hover:bg-rose-100">
+                    Cancel
+                  </button>
+                </span>
+              ) : (
+                <button onClick={() => setConfirmClearId(mineId)} className="btn-ghost !px-3 !py-1.5 !text-xs !text-rose-600">
+                  <Eraser size={14} /> Clear Evaluation
+                </button>
+              )}
+            </>
+          )}
+          <button onClick={handleSubmit} disabled={saving || !allRated || !recommendation} className="btn-gold">
+            <Save size={16} /> {saving ? "Saving…" : "Save Evaluation"}
+          </button>
+        </div>
       </div>
 
       {/* Other panelists */}
@@ -275,8 +413,40 @@ export default function Evaluate() {
                 <div>
                   <p className="text-sm font-semibold text-nu-900">{e.evaluator_name}</p>
                   <p className="text-xs text-ink/40">{e.recommendation}</p>
+                  {((e.recommended_positions && e.recommended_positions.length > 0) || e.recommended_other_position) && (
+                    <p className="text-xs text-ink/40">
+                      For: {[...(e.recommended_positions ?? []), e.recommended_other_position].filter(Boolean).join(", ")}
+                    </p>
+                  )}
                 </div>
-                <p className="font-mono text-lg font-bold text-nu-900">{weightedScore(e).toFixed(1)}</p>
+                <div className="flex items-center gap-3">
+                  <p className="font-mono text-lg font-bold text-nu-900">{weightedScore(e).toFixed(1)}</p>
+                  {isAdmin && (
+                    confirmClearId === e.id ? (
+                      <span className="flex items-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-2 py-1 text-[11px] font-semibold text-rose-700">
+                        Clear?
+                        <button
+                          onClick={() => handleClear(e.id)}
+                          disabled={clearingId === e.id}
+                          className="rounded bg-rose-600 px-1.5 py-0.5 text-white hover:bg-rose-700"
+                        >
+                          {clearingId === e.id ? "…" : "Yes"}
+                        </button>
+                        <button onClick={() => setConfirmClearId(null)} className="rounded px-1.5 py-0.5 text-rose-700 hover:bg-rose-100">
+                          No
+                        </button>
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() => setConfirmClearId(e.id)}
+                        title={`Clear ${e.evaluator_name}'s score sheet`}
+                        className="rounded-lg p-1.5 text-ink/30 hover:bg-rose-50 hover:text-rose-600"
+                      >
+                        <Eraser size={14} />
+                      </button>
+                    )
+                  )}
+                </div>
               </div>
             ))}
           </div>
