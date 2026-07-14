@@ -4,6 +4,7 @@ import Navbar from "./components/Navbar";
 import ProtectedRoute from "./components/ProtectedRoute";
 import Landing from "./pages/Landing";
 import Login from "./pages/Login";
+import MyEvaluation from "./pages/MyEvaluation";
 import Applicants from "./pages/Applicants";
 import Evaluate from "./pages/Evaluate";
 import Summary from "./pages/Summary";
@@ -27,6 +28,7 @@ export default function App() {
           <Routes>
             <Route path="/" element={<Landing />} />
             <Route path="/login" element={<Login />} />
+            <Route path="/my-evaluation" element={<MyEvaluation />} />
             <Route
               path="/applicants"
               element={

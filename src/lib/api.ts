@@ -1,5 +1,5 @@
 import { supabase } from "./supabase";
-import type { Applicant, ApplicantStatus, Assignment, Evaluation, EvaluatorProfile, Position } from "../types";
+import type { Applicant, ApplicantResult, ApplicantStatus, Assignment, Evaluation, EvaluatorProfile, Position } from "../types";
 
 export async function fetchPositions(): Promise<Position[]> {
   const { data, error } = await supabase.from("positions").select("*").order("sort_order", { ascending: true });
@@ -87,6 +87,19 @@ export async function createApplicant(input: {
     status: "Pending",
   });
   if (error) throw error;
+}
+
+/**
+ * Public lookup — no login required. Applicants type in their Applicant ID
+ * (e.g. "APP-0001") to check their own status. Backed by a security-definer
+ * RPC that only ever returns these few fields, never the full applicant row.
+ */
+export async function fetchApplicantResultByCode(code: string): Promise<ApplicantResult | null> {
+  const { data, error } = await supabase
+    .rpc("get_applicant_result", { p_code: code.trim() })
+    .maybeSingle();
+  if (error) throw error;
+  return data as ApplicantResult | null;
 }
 
 export async function fetchEvaluationsForApplicant(applicantId: string): Promise<Evaluation[]> {

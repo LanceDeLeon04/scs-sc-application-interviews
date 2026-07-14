@@ -755,3 +755,112 @@ begin
   end if;
 end $$;
 
+
+-- ---------------------------------------------------------------------
+-- 10. APPLICANT_CODE + PUBLIC "VIEW MY EVALUATION" LOOKUP
+-- Gives every applicant a stable, public-facing ID (APP-0001, APP-0002, ...)
+-- and a public RPC so applicants can check their own result without
+-- signing in — only the fields below are exposed, never the full row.
+-- Safe to re-run.
+-- ---------------------------------------------------------------------
+create sequence if not exists public.applicant_code_seq;
+
+alter table public.applicants
+  add column if not exists applicant_code text;
+
+create or replace function public.set_applicant_code()
+returns trigger
+language plpgsql
+as $$
+begin
+  if new.applicant_code is null then
+    new.applicant_code := 'APP-' || lpad(nextval('public.applicant_code_seq')::text, 4, '0');
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_set_applicant_code on public.applicants;
+create trigger trg_set_applicant_code
+  before insert on public.applicants
+  for each row execute function public.set_applicant_code();
+
+-- Backfill any existing rows (created before this column existed), oldest first.
+do $$
+declare
+  r record;
+begin
+  for r in select id from public.applicants where applicant_code is null order by created_at asc, id asc
+  loop
+    update public.applicants
+       set applicant_code = 'APP-' || lpad(nextval('public.applicant_code_seq')::text, 4, '0')
+     where id = r.id;
+  end loop;
+end $$;
+
+alter table public.applicants alter column applicant_code set not null;
+
+create unique index if not exists applicants_applicant_code_unique_idx
+  on public.applicants (applicant_code);
+
+-- Public lookup: given an applicant_code, return just enough info for the
+-- applicant to check their own status — no login required, and no access
+-- to any other applicant's data or to evaluator identities/notes.
+create or replace function public.get_applicant_result(p_code text)
+returns table (
+  full_name text,
+  position_name text,
+  status text,
+  average_score numeric,
+  has_grades boolean
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_id uuid;
+  v_full_name text;
+  v_status text;
+  v_position_name text;
+  v_assigned_count int;
+  v_eval_count int;
+  v_total numeric;
+begin
+  select a.id, a.full_name, a.status, coalesce(pa.name, pap.name)
+    into v_id, v_full_name, v_status, v_position_name
+  from public.applicants a
+  left join public.positions pa on pa.id = a.position_assigned_id
+  left join public.positions pap on pap.id = a.position_applied_id
+  where a.applicant_code = upper(trim(p_code));
+
+  if v_id is null then
+    return;
+  end if;
+
+  select count(*) into v_assigned_count
+  from public.applicant_evaluators ae
+  where ae.applicant_id = v_id;
+
+  select count(*), coalesce(sum(
+    ((e.leadership * 0.25) + (e.communication * 0.2) + (e.role_knowledge * 0.2)
+     + (e.problem_solving * 0.15) + (e.commitment * 0.1) + (e.professionalism * 0.1))
+    / 5.0 * 100
+  ), 0)
+    into v_eval_count, v_total
+  from public.evaluations e
+  where e.applicant_id = v_id;
+
+  return query select
+    v_full_name,
+    v_position_name,
+    v_status,
+    case when v_eval_count = 0 then null
+         else round(v_total / greatest(coalesce(v_assigned_count, 0), v_eval_count), 1)
+    end,
+    v_eval_count > 0;
+end;
+$$;
+
+revoke all on function public.get_applicant_result(text) from public;
+grant execute on function public.get_applicant_result(text) to anon, authenticated;

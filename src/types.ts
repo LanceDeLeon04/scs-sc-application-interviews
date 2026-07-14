@@ -16,6 +16,7 @@ export interface Position {
 
 export interface Applicant {
   id: string;
+  applicant_code: string;
   full_name: string;
   photo_url: string | null;
   email: string | null;
@@ -32,6 +33,14 @@ export interface Applicant {
   // joined
   position_applied?: Position | null;
   position_assigned?: Position | null;
+}
+
+export interface ApplicantResult {
+  full_name: string;
+  position_name: string | null;
+  status: ApplicantStatus;
+  average_score: number | null;
+  has_grades: boolean;
 }
 
 export type UserRole = "commissioner" | "evaluator";

@@ -182,7 +182,9 @@ export default function Applicants() {
                     <td className="px-5 py-4">
                       <p className="font-semibold text-nu-900">{a.full_name}</p>
                       <p className="text-xs text-ink/40">
-                        {a.course ?? "—"} {a.year_level ? `· ${a.year_level}` : ""}
+                        <span className="font-mono font-semibold text-nu-700/70">{a.applicant_code}</span>
+                        {(a.course || a.year_level) && " · "}
+                        {a.course ?? ""} {a.year_level ? `· ${a.year_level}` : ""}
                       </p>
                     </td>
                     <td className="px-5 py-4 text-ink/70">

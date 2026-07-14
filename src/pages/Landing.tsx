@@ -40,6 +40,9 @@ export default function Landing() {
             <Link to="/login" className="btn-gold">
               Enter Panel Portal <ArrowRight size={16} />
             </Link>
+            <Link to="/my-evaluation" className="btn-ghost !border-white/20 !bg-transparent !text-white hover:!bg-white/10">
+              View My Evaluation
+            </Link>
             <a href="#criteria" className="btn-ghost !border-white/20 !bg-transparent !text-white hover:!bg-white/10">
               View Evaluation Criteria
             </a>
