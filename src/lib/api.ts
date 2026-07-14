@@ -177,6 +177,23 @@ export async function setAssignedEvaluators(applicantId: string, evaluatorIds: s
   if (insertError) throw insertError;
 }
 
+/** Creates a new panel (evaluator) login. Commissioner-only — enforced server-side by the RPC. */
+export async function createPanelAccount(input: {
+  username: string;
+  password: string;
+  fullName: string;
+}): Promise<EvaluatorProfile> {
+  const { data, error } = await supabase
+    .rpc("create_panel_account", {
+      p_username: input.username.trim(),
+      p_password: input.password,
+      p_full_name: input.fullName.trim(),
+    })
+    .single();
+  if (error) throw error;
+  return data as EvaluatorProfile;
+}
+
 export async function fetchAssignedApplicantIdsForEvaluator(evaluatorId: string): Promise<string[]> {
   const { data, error } = await supabase
     .from("applicant_evaluators")

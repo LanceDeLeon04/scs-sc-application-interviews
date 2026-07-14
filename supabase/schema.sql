@@ -336,9 +336,42 @@ on conflict (name) do nothing;
 
 -- Rename pass for databases that already seeded the old "Graphics Artist N"
 -- titles, so existing rows/foreign keys are relabeled instead of orphaned.
-update public.positions set name = 'Graphic Designer 1' where name = 'Graphics Artist 1';
-update public.positions set name = 'Graphic Designer 2' where name = 'Graphics Artist 2';
-update public.positions set name = 'Graphic Designer 3' where name = 'Graphics Artist 3';
+-- Guarded against the case where both the old ("Graphics Artist N") and new
+-- ("Graphic Designer N") rows already exist (e.g. old row from a prior run,
+-- new row from the seed insert above): merge the old row into the new one by
+-- repointing foreign keys, then drop the old row, instead of updating the
+-- name directly and hitting positions_name_key.
+do $$
+declare
+  rename_pair record;
+  old_id uuid;
+  new_id uuid;
+begin
+  for rename_pair in
+    select * from (values
+      ('Graphics Artist 1', 'Graphic Designer 1'),
+      ('Graphics Artist 2', 'Graphic Designer 2'),
+      ('Graphics Artist 3', 'Graphic Designer 3')
+    ) as t(old_name, new_name)
+  loop
+    select id into old_id from public.positions where name = rename_pair.old_name;
+    if old_id is null then
+      continue;
+    end if;
+
+    select id into new_id from public.positions where name = rename_pair.new_name;
+
+    if new_id is null then
+      -- No conflicting row: safe to just rename in place.
+      update public.positions set name = rename_pair.new_name where id = old_id;
+    else
+      -- Both rows exist: merge old_id into new_id, then drop old_id.
+      update public.applicants set position_applied_id = new_id where position_applied_id = old_id;
+      update public.applicants set position_assigned_id = new_id where position_assigned_id = old_id;
+      delete from public.positions where id = old_id;
+    end if;
+  end loop;
+end $$;
 
 -- ---------------------------------------------------------------------
 -- 7. SEED LOGIN ACCOUNTS
@@ -462,6 +495,106 @@ begin
     );
   end loop;
 end $$;
+
+-- ---------------------------------------------------------------------
+-- 7c. RPC: CREATE PANEL ACCOUNT (admin-only)
+-- Lets a signed-in commissioner create a new evaluator ("panel") login
+-- from inside the app instead of editing this script by hand. Mirrors the
+-- seed block in section 7: creates the auth.users + auth.identities rows
+-- (with an already-encrypted password) plus the matching profiles row.
+-- SECURITY DEFINER so it can write to the auth schema — the role check
+-- inside the function body is what actually restricts this to
+-- commissioners, since callers otherwise have no access to auth.*.
+-- ---------------------------------------------------------------------
+create or replace function public.create_panel_account(
+  p_username text,
+  p_password text,
+  p_full_name text
+)
+returns table (id uuid, username text, full_name text, role text)
+language plpgsql
+security definer
+set search_path = public, auth
+as $$
+declare
+  caller_role text;
+  clean_username text := trim(coalesce(p_username, ''));
+  clean_full_name text := trim(coalesce(p_full_name, ''));
+  synth_email text;
+  new_user_id uuid;
+begin
+  select p.role into caller_role from public.profiles p where p.id = auth.uid();
+  if caller_role is distinct from 'commissioner' then
+    raise exception 'Only commissioners can create panel accounts.' using errcode = '42501';
+  end if;
+
+  if clean_username = '' then
+    raise exception 'Username is required.' using errcode = '22023';
+  end if;
+  if p_password is null or length(p_password) < 6 then
+    raise exception 'Password must be at least 6 characters.' using errcode = '22023';
+  end if;
+  if clean_full_name = '' then
+    raise exception 'Name is required.' using errcode = '22023';
+  end if;
+  if exists (select 1 from public.profiles p where lower(p.username) = lower(clean_username)) then
+    raise exception 'That username is already taken.' using errcode = '23505';
+  end if;
+
+  synth_email := lower(clean_username) || '@scs.local';
+  new_user_id := gen_random_uuid();
+
+  insert into auth.users (
+    id, instance_id, aud, role, email, encrypted_password,
+    email_confirmed_at, raw_app_meta_data, raw_user_meta_data,
+    created_at, updated_at, confirmation_token, recovery_token,
+    email_change_token_new, email_change
+  ) values (
+    new_user_id,
+    '00000000-0000-0000-0000-000000000000',
+    'authenticated',
+    'authenticated',
+    synth_email,
+    crypt(p_password, gen_salt('bf')),
+    now(),
+    '{"provider":"email","providers":["email"]}'::jsonb,
+    jsonb_build_object(
+      'username', clean_username,
+      'full_name', clean_full_name,
+      'role', 'evaluator'
+    ),
+    now(),
+    now(),
+    '',
+    '',
+    '',
+    ''
+  );
+
+  -- Password-grant login also requires a matching auth.identities row for
+  -- the "email" provider; without it Supabase Auth returns 400 Bad Request.
+  insert into auth.identities (
+    id, user_id, provider_id, identity_data, provider, last_sign_in_at, created_at, updated_at
+  ) values (
+    gen_random_uuid(),
+    new_user_id,
+    new_user_id::text,
+    jsonb_build_object('sub', new_user_id::text, 'email', synth_email),
+    'email',
+    now(),
+    now(),
+    now()
+  );
+
+  insert into public.profiles (id, username, full_name, role)
+  values (new_user_id, clean_username, clean_full_name, 'evaluator');
+
+  return query select new_user_id, clean_username, clean_full_name, 'evaluator'::text;
+end;
+$$;
+
+revoke all on function public.create_panel_account(text, text, text) from public;
+grant execute on function public.create_panel_account(text, text, text) to authenticated;
 
 -- ---------------------------------------------------------------------
 -- 8. ADDING MORE ACCOUNTS LATER

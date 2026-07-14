@@ -12,8 +12,9 @@ import type { Applicant, ApplicantStatus, Assignment, EvaluatorProfile, Position
 import StatusBadge from "../components/StatusBadge";
 import ReassignModal from "../components/ReassignModal";
 import AssignEvaluatorsModal from "../components/AssignEvaluatorsModal";
+import CreatePanelAccountModal from "../components/CreatePanelAccountModal";
 import { useAuth } from "../context/AuthContext";
-import { Search, SlidersHorizontal, ArrowRight, UserPlus, X, Users } from "lucide-react";
+import { Search, SlidersHorizontal, ArrowRight, UserPlus, UserRoundPlus, X, Users } from "lucide-react";
 
 const STATUSES: (ApplicantStatus | "All")[] = ["All", "Pending", "Evaluated", "Qualified", "Disqualified"];
 
@@ -33,6 +34,7 @@ export default function Applicants() {
   const [reassignTarget, setReassignTarget] = useState<Applicant | null>(null);
   const [assignTarget, setAssignTarget] = useState<Applicant | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
+  const [showCreatePanelForm, setShowCreatePanelForm] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -105,9 +107,14 @@ export default function Applicants() {
           </p>
         </div>
         {isAdmin && (
-          <button onClick={() => setShowAddForm(true)} className="btn-primary">
-            <UserPlus size={16} /> Add applicant
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button onClick={() => setShowCreatePanelForm(true)} className="btn-ghost">
+              <UserRoundPlus size={16} /> Add panel account
+            </button>
+            <button onClick={() => setShowAddForm(true)} className="btn-primary">
+              <UserPlus size={16} /> Add applicant
+            </button>
+          </div>
         )}
       </div>
 
@@ -250,6 +257,13 @@ export default function Applicants() {
 
       {showAddForm && (
         <AddApplicantModal positions={positions} onClose={() => setShowAddForm(false)} onSaved={load} />
+      )}
+
+      {showCreatePanelForm && (
+        <CreatePanelAccountModal
+          onClose={() => setShowCreatePanelForm(false)}
+          onCreated={(evaluator) => setEvaluators((prev) => [...prev, evaluator].sort((a, b) => (a.full_name ?? "").localeCompare(b.full_name ?? "")))}
+        />
       )}
     </div>
   );
